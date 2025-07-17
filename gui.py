@@ -1,5 +1,4 @@
 
-
 import customtkinter as ctk
 import threading
 import queue
@@ -28,7 +27,6 @@ class App(ctk.CTk):
         self.log_queue = queue.Queue()
         self.update_queue = queue.Queue()
 
-        # Lista para armazenar as variáveis das caixas de Soros >>>
         self.soros_level_vars = []
 
         # Configuração do grid principal para ser responsivo
@@ -42,17 +40,13 @@ class App(ctk.CTk):
         self.process_log_queue()
         self.process_update_queue()
 
-    # Método para gerenciar a lógica das caixas de Soros >>>
     def update_soros_levels(self, level_clicked):
         """Garante que os níveis de Soros sejam marcados ou desmarcados em sequência."""
-        # Índices são baseados em 0 (nível 1 é índice 0)
         level_index = level_clicked - 1
         
-        # Se a caixa foi marcada, marca todas as anteriores
         if self.soros_level_vars[level_index].get():
             for i in range(level_index + 1):
                 self.soros_level_vars[i].set(True)
-        # Se a caixa foi desmarcada, desmarca todas as posteriores
         else:
             for i in range(level_index, len(self.soros_level_vars)):
                 self.soros_level_vars[i].set(False)
@@ -67,7 +61,9 @@ class App(ctk.CTk):
         settings_frame = ctk.CTkScrollableFrame(self.left_frame, label_text="Configurações", label_font=ctk.CTkFont(size=16, weight="bold"))
         settings_frame.grid(row=0, column=0, padx=5, pady=0, sticky="nsew")
         
-        # --- Widgets dentro da área de rolagem (código anterior mantido) ---
+        # --- Widgets dentro da área de rolagem ---
+        
+        # Credenciais
         email_label = ctk.CTkLabel(settings_frame, text="Credenciais")
         email_label.pack(pady=(5,0), padx=10, fill="x")
         self.email_entry = ctk.CTkEntry(settings_frame, placeholder_text="Email")
@@ -75,12 +71,14 @@ class App(ctk.CTk):
         self.password_entry = ctk.CTkEntry(settings_frame, placeholder_text="Senha", show="*")
         self.password_entry.pack(pady=(5,10), padx=10, fill="x")
 
+        # Tipo de Conta
         account_type_label = ctk.CTkLabel(settings_frame, text="Tipo de Conta")
         account_type_label.pack(pady=(5,0), padx=10, fill="x")
         self.account_type_var = ctk.StringVar(value="PRACTICE")
         ctk.CTkRadioButton(settings_frame, text="DEMO", variable=self.account_type_var, value="PRACTICE").pack(pady=5, padx=20, anchor="w")
         ctk.CTkRadioButton(settings_frame, text="REAL", variable=self.account_type_var, value="REAL").pack(pady=(0,10), padx=20, anchor="w")
 
+        # Valor da Entrada
         stake_label = ctk.CTkLabel(settings_frame, text="Valor da Entrada")
         stake_label.pack(pady=(5,0), padx=10, fill="x")
         self.stake_mode_var = ctk.StringVar(value="percentage")
@@ -92,7 +90,7 @@ class App(ctk.CTk):
         self.fixed_entry = ctk.CTkEntry(settings_frame, placeholder_text="Ex: 5.00")
         self.fixed_entry.pack(pady=(0,10), padx=40, fill="x")
         
-        # --- BLOCO DE SOROS ATUALIZADO ---
+        # Estratégia de Capital (Soros)
         capital_strategy_label = ctk.CTkLabel(settings_frame, text="Estratégia de Capital")
         capital_strategy_label.pack(pady=(5,0), padx=10, fill="x")
         
@@ -100,28 +98,39 @@ class App(ctk.CTk):
         self.soros_checkbox = ctk.CTkCheckBox(settings_frame, text="Habilitar Soros", variable=self.use_soros_var)
         self.soros_checkbox.pack(pady=5, padx=20, anchor="w")
 
-        # Frame para agrupar as caixas de seleção de nível
+        # <<< AJUSTE 1: Frame dos níveis alinhado com o checkbox acima (padx=20) >>>
         soros_levels_frame = ctk.CTkFrame(settings_frame, fg_color="transparent")
-        soros_levels_frame.pack(pady=0, padx=35, fill="x")
+        soros_levels_frame.pack(pady=0, padx=20, fill="x")
 
-        # Cria as caixas de seleção para os níveis de Soros dinamicamente
         MAX_SOROS_LEVELS = 3
         for i in range(1, MAX_SOROS_LEVELS + 1):
             var = ctk.BooleanVar(value=False)
             self.soros_level_vars.append(var)
             checkbox = ctk.CTkCheckBox(
-                soros_levels_frame,
-                text=f"Soros Nível {i}",
-                variable=var,
-                # O comando lambda é essencial para passar o número do nível corretamente
-                command=lambda level=i: self.update_soros_levels(level)
+            soros_levels_frame,
+            text=f"Nível {i}",
+            variable=var,
+            command=lambda level=i: self.update_soros_levels(level),
+            font=ctk.CTkFont(size=12) # <-- Tamanho da fonte e caixa reduzido
             )
-            checkbox.pack(anchor="w", pady=2)
-        # --- FIM DO BLOCO DE SOROS ATUALIZADO ---
+            # <<< AJUSTE 2: Empacota os checkboxes lado a lado (horizontalmente) >>>
+            checkbox.pack(side="left", padx=(0, 4))
         
+        # Filtro de Notícias
+        news_filter_label = ctk.CTkLabel(settings_frame, text="Filtros Adicionais")
+        news_filter_label.pack(pady=(10,0), padx=10, fill="x")
+        
+        self.filter_news_var = ctk.BooleanVar(value=True) 
+        self.news_checkbox = ctk.CTkCheckBox(
+            settings_frame, 
+            text="Pausar durante notícias", 
+            variable=self.filter_news_var
+        )
+        self.news_checkbox.pack(pady=5, padx=20, anchor="w")
+
         # Gerenciamento de Risco
         risk_label = ctk.CTkLabel(settings_frame, text="Gerenciamento Diário")
-        risk_label.pack(pady=(10,0), padx=10, fill="x") # Adicionado pady para espaçamento
+        risk_label.pack(pady=(10,0), padx=10, fill="x")
         ctk.CTkLabel(settings_frame, text="Stop Loss (% do saldo inicial)").pack(fill="x", padx=20, pady=(5,0))
         self.stop_loss_entry = ctk.CTkEntry(settings_frame, placeholder_text="Ex: 10.0")
         self.stop_loss_entry.insert(0, "10.0")
@@ -131,7 +140,7 @@ class App(ctk.CTk):
         self.take_profit_entry.insert(0, "5.0")
         self.take_profit_entry.pack(pady=(0,15), padx=40, fill="x")
         
-        # ÁREA DE CONTROLE (BOTÕES) - Sem alterações
+        # ÁREA DE CONTROLE (BOTÕES)
         control_frame = ctk.CTkFrame(self.left_frame, fg_color="transparent")
         control_frame.grid(row=1, column=0, padx=5, pady=5, sticky="ew")
 
@@ -142,28 +151,26 @@ class App(ctk.CTk):
         self.status_label = ctk.CTkLabel(control_frame, text="Status: Parado", font=ctk.CTkFont(size=14))
         self.status_label.pack(pady=5)
 
-
     def create_right_frame(self):
-        # Nenhuma alteração nesta função
         self.right_frame = ctk.CTkFrame(self, corner_radius=10)
         self.right_frame.grid(row=0, column=1, padx=(0, 10), pady=10, sticky="nsew")
         self.right_frame.grid_columnconfigure(0, weight=1)
         self.right_frame.grid_rowconfigure(1, weight=1)
+        
         dashboard_frame = ctk.CTkFrame(self.right_frame)
         dashboard_frame.grid(row=0, column=0, padx=10, pady=10, sticky="ew")
         dashboard_frame.grid_columnconfigure((0,1,2,3,4), weight=1)
+        
         self.balance_label = ctk.CTkLabel(dashboard_frame, text="Saldo\n$0.00", font=ctk.CTkFont(size=14)); self.balance_label.grid(row=0, column=0, padx=5, pady=5)
         self.pnl_label = ctk.CTkLabel(dashboard_frame, text="P/L Diário\n$0.00", font=ctk.CTkFont(size=14)); self.pnl_label.grid(row=0, column=1, padx=5, pady=5)
         self.wins_label = ctk.CTkLabel(dashboard_frame, text="Vitórias\n0", font=ctk.CTkFont(size=14)); self.wins_label.grid(row=0, column=2, padx=5, pady=5)
         self.losses_label = ctk.CTkLabel(dashboard_frame, text="Derrotas\n0", font=ctk.CTkFont(size=14)); self.losses_label.grid(row=0, column=3, padx=5, pady=5)
         self.assertiveness_label = ctk.CTkLabel(dashboard_frame, text="Assertividade\n0.00%", font=ctk.CTkFont(size=14)); self.assertiveness_label.grid(row=0, column=4, padx=5, pady=5)
+        
         self.log_textbox = ctk.CTkTextbox(self.right_frame, state="disabled", corner_radius=10, font=("Courier New", 12)); self.log_textbox.grid(row=1, column=0, padx=10, pady=(0, 10), sticky="nsew")
-
 
     def start_bot(self):
         try:
-            # <<< LÓGICA DE COLETA DE NÍVEL DE SOROS ATUALIZADA >>>
-            # Conta quantas caixas de seleção de nível estão marcadas
             soros_levels_from_checkboxes = sum(1 for var in self.soros_level_vars if var.get())
 
             settings = {
@@ -174,10 +181,9 @@ class App(ctk.CTk):
                 'stop_loss': float(self.stop_loss_entry.get() or 10.0), 
                 'take_profit': float(self.take_profit_entry.get() or 5.0),
                 'use_soros': self.use_soros_var.get(),
-                # Usa o valor calculado a partir das caixas de seleção
-                'soros_levels': soros_levels_from_checkboxes
+                'soros_levels': soros_levels_from_checkboxes,
+                'filter_news': self.filter_news_var.get()
             }
-            # <<< FIM DA ATUALIZAÇÃO >>>
 
             if settings['stake_mode'] == 'percentage':
                 settings['stake_value'] = float(self.percentage_entry.get() or 1.0)
@@ -202,7 +208,6 @@ class App(ctk.CTk):
             self.log_message(f"ERRO ao iniciar: {e}")
     
     def stop_bot(self):
-        # Nenhuma alteração nesta função
         if self.bot_thread and self.bot_thread.is_alive():
             self.status_label.configure(text="Status: Parando...")
             self.stop_event.set()
@@ -210,21 +215,18 @@ class App(ctk.CTk):
         self.start_button.configure(state="normal")
 
     def log_message(self, message):
-        # Nenhuma alteração nesta função
         self.log_textbox.configure(state="normal")
         self.log_textbox.insert("end", f"{datetime.now().strftime('%H:%M:%S')} - {message}\n")
         self.log_textbox.configure(state="disabled")
         self.log_textbox.see("end")
 
     def process_log_queue(self):
-        # Nenhuma alteração nesta função
         try:
             while not self.log_queue.empty(): self.log_message(self.log_queue.get_nowait())
         finally:
             self.after(200, self.process_log_queue)
 
     def process_update_queue(self):
-        # Nenhuma alteração nesta função
         try:
             while not self.update_queue.empty():
                 data = self.update_queue.get_nowait()
