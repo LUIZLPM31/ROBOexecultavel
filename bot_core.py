@@ -1,7 +1,8 @@
+# bot_core.py
 
 import time
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime
 import importlib
 import os
 import sys
@@ -37,7 +38,26 @@ class BotCore:
     def update_ui(self, data):
         self.update_queue.put(data)
 
+    def _establish_connection(self, max_attempts=5, delay_seconds=30):
+        self.log("Tentando estabelecer conexão com a IQ Option...")
+        for attempt in range(1, max_attempts + 1):
+            if self.stop_event.is_set():
+                self.log("Parada solicitada durante a tentativa de conexão.")
+                return None
+            self.log(f"Tentativa de conexão {attempt}/{max_attempts}...")
+            iq_conn = IQOptionConnection(self.email, self.password)
+            if iq_conn.connect():
+                self.log("Conexão estabelecida com sucesso.")
+                return iq_conn
+            if attempt < max_attempts:
+                self.log(f"Falha na conexão. Nova tentativa em {delay_seconds} segundos.")
+                self.stop_event.wait(delay_seconds)
+        self.log(f"ERRO CRÍTICO: Não foi possível conectar à IQ Option após {max_attempts} tentativas.")
+        self.update_ui({'status': 'Erro de Conexão'})
+        return None
+
     def load_strategies(self):
+        # (O conteúdo desta função permanece inalterado)
         strategies = {}
         if getattr(sys, 'frozen', False):
             base_path = sys._MEIPASS
@@ -67,6 +87,7 @@ class BotCore:
         return 'OTC' if datetime.now().weekday() >= 5 else 'REGULAR'
 
     def find_active_assets(self, market_type, iq_conn):
+        # (O conteúdo desta função permanece inalterado)
         iq_conn.update_open_assets()
         active_assets = []
         self.log(f"--- MODO {market_type}: Buscando ativos ---")
@@ -107,9 +128,9 @@ class BotCore:
 
     def run(self):
         self.log("Iniciando o núcleo do robô...")
-        iq = IQOptionConnection(self.email, self.password)
-        if not iq.connect():
-            self.log("ERRO: Falha na conexão."); self.update_ui({'status': 'Erro de Conexão'}); return
+        iq = self._establish_connection()
+        if not iq:
+            self.log("Encerrando o robô devido à falha na conexão."); self.update_ui({'status': 'Parado'}); return
 
         iq.api.change_balance(self.account_type)
         balance = iq.api.get_balance()
@@ -130,12 +151,13 @@ class BotCore:
 
         self.update_ui({'status': 'Rodando'})
         while not self.stop_event.is_set():
-            if risk_manager.check_stop_loss() or risk_manager.check_take_profit():
-                self.log(f"Meta de P/L atingida. Encerrando."); break
+            if risk_manager.check_stop_loss():
+                self.log(f"STOP LOSS atingido. Encerrando."); self.update_ui({'status': 'Stop Atingido'}); break
+            if risk_manager.check_take_profit():
+                self.log(f"TAKE PROFIT atingido. Encerrando."); self.update_ui({'status': 'Meta Atingida'}); break
 
             market_type = self.get_market_type()
             active_assets = self.find_active_assets(market_type, iq)
-
             if not active_assets:
                 self.log("Nenhum ativo operacional encontrado. Aguardando 1 minuto."); self.stop_event.wait(60); continue
 
@@ -147,13 +169,10 @@ class BotCore:
 
             for asset_info in active_assets:
                 if self.stop_event.is_set(): break
-                
                 asset_name = asset_info['name']
                 
-                if self.use_news_filter and news_checker:
-                    if not news_checker.is_trading_safe(asset_name):
-                        self.log(f"Análise para {asset_name} pulada devido a proximidade de notícia.")
-                        continue
+                if self.use_news_filter and news_checker and not news_checker.is_trading_safe(asset_name):
+                    self.log(f"Análise para {asset_name} pulada devido a proximidade de notícia."); continue
 
                 df_m1 = iq.get_candles(asset_name, self.TIMEFRAME, 110, time.time())
                 if df_m1 is None or len(df_m1) < 100:
@@ -177,21 +196,36 @@ class BotCore:
                             stake = risk_manager.calculate_stake()
                             if stake <= 0: self.log("Valor de entrada é zero. Nenhuma ordem será aberta."); continue
 
-                            soros_info = ""
-                            if risk_manager.use_soros and risk_manager.soros_current_level > 0:
-                                soros_info = f" (Soros Nível {risk_manager.soros_current_level})"
-                            self.log(f"SINAL {signal} em {asset_name} por {name} | Entrada: ${stake:.2f}{soros_info}")
+                            strategy_info = ""
+                            if risk_manager.capital_strategy == 'soros' and risk_manager.soros_current_level > 0:
+                                strategy_info = f" (Soros Nível {risk_manager.soros_current_level})"
+                            elif risk_manager.capital_strategy == 'martingale' and risk_manager.martingale_current_level > 0:
+                                strategy_info = f" (Martingale Nível {risk_manager.martingale_current_level})"
+                            
+                            self.log(f"SINAL {signal} em {asset_name} por {name} | Entrada: ${stake:.2f}{strategy_info}")
                             
                             order_id = iq.buy_binary(stake, asset_name, signal.lower(), self.EXPIRATION_TIME)
                             if order_id:
-                                self.log(f"Ordem {order_id} enviada. Aguardando resultado...")
                                 self.update_ui({'status': f"Operando em {asset_name}"})
                                 profit = iq.check_win(order_id)
                                 risk_manager.register_trade_result(profit)
+                                
                                 result_msg = "WIN" if profit > 0 else "LOSS" if profit < 0 else "DRAW"
                                 self.log(f"Resultado: {result_msg} | Valor: ${profit:.2f}. P/L Dia: ${risk_manager.daily_profit_loss:.2f}")
-                                self.update_ui({'pnl': f"${risk_manager.daily_profit_loss:.2f}",'wins': risk_manager.wins,'losses': risk_manager.losses,'assertiveness': f"{risk_manager.get_assertiveness():.2f}%",'balance': f"${risk_manager.current_balance:.2f}"})
+                                
+                                # Salva a operação no CSV
+                                risk_manager.log_trade_to_csv(asset_name, signal, stake, result_msg, profit)
+
+                                self.update_ui({
+                                    'pnl': f"${risk_manager.daily_profit_loss:.2f}",
+                                    'wins': risk_manager.wins,
+                                    'losses': risk_manager.losses,
+                                    'assertiveness': f"{risk_manager.get_assertiveness():.2f}%",
+                                    'balance': f"${risk_manager.current_balance:.2f}"
+                                })
                                 signal_found = True; self.stop_event.wait(5); break
                     if signal_found: break
-
-        self.log("Núcleo do robô finalizado."); self.update_ui({'status': 'Parado'})
+        
+        self.log(f"Histórico de operações salvo em: {risk_manager.csv_filename}")
+        final_status = self.update_queue.get_nowait().get('status', 'Parado') if not self.update_queue.empty() else 'Parado'
+        self.update_ui({'status': final_status})
