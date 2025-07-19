@@ -81,19 +81,23 @@ class RiskManagement:
 
     def calculate_stake(self):
         """Calcula o valor da próxima entrada com base na estratégia de capital selecionada."""
-        # Se estiver em um ciclo de Soros
+        
+        # Se estiver em um ciclo de Soros, calcula a entrada composta.
         if self.capital_strategy == 'soros' and self.soros_current_level > 0:
             stake = self.soros_initial_stake + self.soros_accumulated_profit
             return min(stake, self.current_balance)
 
-        # Se estiver em um ciclo de Martingale
+        # Se estiver em um ciclo de Martingale, calcula a entrada multiplicada.
         if self.capital_strategy == 'martingale' and self.martingale_current_level > 0:
             stake = self.martingale_base_stake * (self.martingale_multiplier ** self.martingale_current_level)
             return min(stake, self.current_balance)
 
-        # Cálculo da entrada inicial (para todas as estratégias)
+        # --- CÁLCULO INICIAL (Apenas para o início de um ciclo) ---
+        # Se não estiver em nenhum ciclo ativo, calcula a entrada base.
         initial_stake = self.calculate_initial_stake()
         
+        # Define o valor base para o ciclo que está prestes a começar.
+        # Esta lógica agora só roda quando soros_current_level e martingale_current_level são 0.
         if self.capital_strategy == 'soros':
             self.soros_initial_stake = initial_stake
         elif self.capital_strategy == 'martingale':

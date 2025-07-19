@@ -1,4 +1,4 @@
-# bot_core.py
+# bot_core.py (VERSÃO MELHORADA)
 
 import time
 import logging
@@ -56,8 +56,8 @@ class BotCore:
         self.update_ui({'status': 'Erro de Conexão'})
         return None
 
+    # <--- MUDANÇA: Lógica de carregamento de estratégias foi aprimorada --->
     def load_strategies(self):
-        # (O conteúdo desta função permanece inalterado)
         strategies = {}
         if getattr(sys, 'frozen', False):
             base_path = sys._MEIPASS
@@ -71,59 +71,56 @@ class BotCore:
             
         sys.path.insert(0, base_path)
         for filename in os.listdir(strategy_folder):
-            if filename.startswith('strategy_') and filename.endswith('.py'):
+            # Procura por arquivos de estratégia que não sejam a versão melhorada para evitar duplicatas
+            if filename.startswith('strategy_') and filename.endswith('.py') and 'improved' not in filename:
                 module_name = f"strategies.{filename[:-3]}"
                 try:
                     module = importlib.import_module(module_name)
+                    
+                    # Lógica de compatibilidade: Apenas carrega a função check_signal
                     if hasattr(module, 'check_signal'):
                         strategies[filename] = module.check_signal
-                        self.log(f"Estratégia '{filename}' carregada.")
+                        self.log(f"Estratégia de FUNÇÃO '{filename}' carregada (modo de compatibilidade).")
+
                 except ImportError as e:
                     self.log(f"ERRO: Falha ao carregar a estratégia '{module_name}': {e}")
+        
+        # Carrega a nova estratégia de CLASSE separadamente, passando as configurações
+        try:
+            from strategies.strategy_ema_rsi_fibo_improved import EmaRsiFiboStrategy
+            # Instancia a classe com as configurações da GUI
+            strategy_instance = EmaRsiFiboStrategy(self.settings)
+            strategies['strategy_ema_rsi_fibo_improved.py'] = strategy_instance
+            self.log("Estratégia de CLASSE 'EmaRsiFiboStrategy' carregada e configurada.")
+        except ImportError:
+            self.log("AVISO: A estratégia melhorada 'strategy_ema_rsi_fibo_improved.py' não foi encontrada.")
+        
         sys.path.pop(0)
         return strategies
+
 
     def get_market_type(self):
         return 'OTC' if datetime.now().weekday() >= 5 else 'REGULAR'
 
     def find_active_assets(self, market_type, iq_conn):
-        # (O conteúdo desta função permanece inalterado)
         iq_conn.update_open_assets()
         active_assets = []
         self.log(f"--- MODO {market_type}: Buscando ativos ---")
-
         all_open_binary = iq_conn.open_binary_assets
+        asset_list = self.PREFERRED_ASSETS if market_type == 'REGULAR' else self.OTC_ASSETS
 
-        if market_type == 'REGULAR':
-            for api_asset_name in all_open_binary.keys():
-                if '-OTC' in api_asset_name:
-                    continue
-
-                for preferred_asset in self.PREFERRED_ASSETS:
-                    if api_asset_name.startswith(preferred_asset):
-                        is_tradable = iq_conn.is_asset_available_for_trading(api_asset_name, 'binary')
-                        is_supported = iq_conn.is_asset_supported_by_library(preferred_asset)
-                        
-                        if is_tradable and is_supported:
-                            active_assets.append({'name': api_asset_name, 'type': 'binary'})
-                            self.log(f"✓ Ativo Encontrado: {api_asset_name} (Base p/ velas: {preferred_asset})")
-                            break
-        
-        else: # market_type == 'OTC'
-            for asset in self.OTC_ASSETS:
-                if iq_conn.is_asset_available_for_trading(asset, 'binary') and iq_conn.is_asset_supported_by_library(asset):
-                    active_assets.append({'name': asset, 'type': 'binary'})
-                    self.log(f"✓ Ativo Encontrado: {asset}")
+        for asset in asset_list:
+            if iq_conn.is_asset_available_for_trading(asset, 'binary'):
+                active_assets.append({'name': asset, 'type': 'binary'})
+                self.log(f"✓ Ativo Encontrado: {asset}")
 
         if not active_assets and market_type == 'REGULAR':
-            self.log("Nenhum ativo REGULAR preferido encontrado. PLANO C: Buscando por OTC disponíveis...")
-            for asset in all_open_binary.keys():
-                if '-OTC' in asset:
-                    if iq_conn.is_asset_available_for_trading(asset, 'binary'):
-                        active_assets.append({'name': asset, 'type': 'binary'})
-                        self.log(f"✓ Fallback OTC: {asset} (Binary)")
-                        if len(active_assets) >= 5: break
-
+            self.log("Nenhum ativo REGULAR preferido encontrado. Buscando por OTC disponíveis...")
+            for asset in self.OTC_ASSETS:
+                 if iq_conn.is_asset_available_for_trading(asset, 'binary'):
+                    active_assets.append({'name': asset, 'type': 'binary'})
+                    self.log(f"✓ Fallback OTC: {asset}")
+        
         return active_assets
 
     def run(self):
@@ -144,17 +141,14 @@ class BotCore:
         if not strategies:
             self.log("ERRO: Nenhuma estratégia carregada."); self.update_ui({'status': 'Erro de Estratégia'}); return
 
-        news_checker = None
-        if self.use_news_filter:
-            news_checker = NewsFilter()
-            self.log("Filtro de notícias de alto impacto está ATIVADO.")
+        news_checker = NewsFilter() if self.use_news_filter else None
+        if self.use_news_filter: self.log("Filtro de notícias de alto impacto está ATIVADO.")
 
         self.update_ui({'status': 'Rodando'})
         while not self.stop_event.is_set():
-            if risk_manager.check_stop_loss():
-                self.log(f"STOP LOSS atingido. Encerrando."); self.update_ui({'status': 'Stop Atingido'}); break
-            if risk_manager.check_take_profit():
-                self.log(f"TAKE PROFIT atingido. Encerrando."); self.update_ui({'status': 'Meta Atingida'}); break
+            if risk_manager.check_stop_loss() or risk_manager.check_take_profit():
+                status_msg = "Stop Loss" if risk_manager.check_stop_loss() else "Take Profit"
+                self.log(f"{status_msg} atingido. Encerrando o dia."); self.update_ui({'status': f'{status_msg} Atingido'}); break
 
             market_type = self.get_market_type()
             active_assets = self.find_active_assets(market_type, iq)
@@ -174,8 +168,8 @@ class BotCore:
                 if self.use_news_filter and news_checker and not news_checker.is_trading_safe(asset_name):
                     self.log(f"Análise para {asset_name} pulada devido a proximidade de notícia."); continue
 
-                df_m1 = iq.get_candles(asset_name, self.TIMEFRAME, 110, time.time())
-                if df_m1 is None or len(df_m1) < 100:
+                df_m1 = iq.get_candles(asset_name, self.TIMEFRAME, 200, time.time())
+                if df_m1 is None or len(df_m1) < 150:
                     self.log(f"Dados insuficientes para {asset_name} em M1. Pulando."); continue
 
                 current_candle_timestamp = df_m1.index[-1]
@@ -183,27 +177,33 @@ class BotCore:
                     self.last_candle_times[asset_name] = current_candle_timestamp
                     signal_found = False
 
-                    for name, strategy_func in strategies.items():
-                        signal = None
+                    for name, strategy_obj in strategies.items():
+                        signal, info = None, {}
                         try:
-                            if 'df_m5' in strategy_func.__code__.co_varnames:
-                                df_m5 = iq.get_candles(asset_name, 300, 50, time.time())
-                                if df_m5 is not None: signal = strategy_func(df_m1.copy(), df_m5.copy())
-                            else: signal = strategy_func(df_m1.copy())
+                            # <--- MUDANÇA: Lida com ambos os tipos de estratégia (função ou classe) --->
+                            if hasattr(strategy_obj, 'check_signal'): # É uma instância de classe
+                                result = strategy_obj.check_signal(df_m1.copy())
+                                if isinstance(result, dict):
+                                    signal = result.get('signal')
+                                    info = result.get('info', {})
+                                else: # Mantém compatibilidade com a função wrapper
+                                    signal = result
+                            else: # É uma função simples
+                                signal = strategy_obj(df_m1.copy())
+
                         except Exception as e: self.log(f"Erro na estratégia {name} para {asset_name}: {e}")
 
                         if signal:
                             stake = risk_manager.calculate_stake()
                             if stake <= 0: self.log("Valor de entrada é zero. Nenhuma ordem será aberta."); continue
-
-                            strategy_info = ""
-                            if risk_manager.capital_strategy == 'soros' and risk_manager.soros_current_level > 0:
-                                strategy_info = f" (Soros Nível {risk_manager.soros_current_level})"
-                            elif risk_manager.capital_strategy == 'martingale' and risk_manager.martingale_current_level > 0:
-                                strategy_info = f" (Martingale Nível {risk_manager.martingale_current_level})"
                             
-                            self.log(f"SINAL {signal} em {asset_name} por {name} | Entrada: ${stake:.2f}{strategy_info}")
+                            self.log(f"SINAL {signal} em {asset_name} por {name} | Entrada: ${stake:.2f}")
                             
+                            # <--- MUDANÇA: Loga a informação de SL/TP se disponível --->
+                            if info and 'stop_loss' in info and 'take_profit' in info:
+                                self.log(f"  -> Info da Estratégia: SL: {info['stop_loss']:.5f} | TP: {info['take_profit']:.5f} (AVISO: SL/TP não aplicável para Opções Binárias)")
+                            
+                            # A execução continua sendo de Opção Binária
                             order_id = iq.buy_binary(stake, asset_name, signal.lower(), self.EXPIRATION_TIME)
                             if order_id:
                                 self.update_ui({'status': f"Operando em {asset_name}"})
@@ -212,14 +212,11 @@ class BotCore:
                                 
                                 result_msg = "WIN" if profit > 0 else "LOSS" if profit < 0 else "DRAW"
                                 self.log(f"Resultado: {result_msg} | Valor: ${profit:.2f}. P/L Dia: ${risk_manager.daily_profit_loss:.2f}")
-                                
-                                # Salva a operação no CSV
                                 risk_manager.log_trade_to_csv(asset_name, signal, stake, result_msg, profit)
 
                                 self.update_ui({
                                     'pnl': f"${risk_manager.daily_profit_loss:.2f}",
-                                    'wins': risk_manager.wins,
-                                    'losses': risk_manager.losses,
+                                    'wins': risk_manager.wins, 'losses': risk_manager.losses,
                                     'assertiveness': f"{risk_manager.get_assertiveness():.2f}%",
                                     'balance': f"${risk_manager.current_balance:.2f}"
                                 })
@@ -227,5 +224,7 @@ class BotCore:
                     if signal_found: break
         
         self.log(f"Histórico de operações salvo em: {risk_manager.csv_filename}")
-        final_status = self.update_queue.get_nowait().get('status', 'Parado') if not self.update_queue.empty() else 'Parado'
+        final_status = 'Parado'
+        if risk_manager.check_stop_loss(): final_status = 'Stop Atingido'
+        elif risk_manager.check_take_profit(): final_status = 'Meta Atingida'
         self.update_ui({'status': final_status})
