@@ -19,14 +19,14 @@ class App(ctk.CTk):
         super().__init__()
 
         self.title("Robô Trader IQ Option")
-        self.geometry("850x700")
+        self.geometry("860x800")
         self.minsize(800, 650)
         
         # --- Configuração de Cores ---
         ctk.set_appearance_mode("dark")
         ctk.set_default_color_theme("blue")
         
-        self.configure(fg_color="#0F0F0F")
+        self.configure(fg_color="#0C0C0C")
 
         self.bot_thread = None
         self.stop_event = threading.Event()
@@ -73,8 +73,8 @@ class App(ctk.CTk):
                 self.soros_level_vars[i].set(False)
 
     def create_left_frame(self):
-        self.left_frame = ctk.CTkFrame(self, corner_radius=10, fg_color="#0E0E0E")
-        self.left_frame.grid(row=0, column=0, padx=10, pady=10, sticky="nsew")
+        self.left_frame = ctk.CTkFrame(self, corner_radius=10, fg_color="#070707")
+        self.left_frame.grid(row=0, column=0, padx=6, pady=6, sticky="nsew")
         self.left_frame.grid_rowconfigure(0, weight=1)
         self.left_frame.grid_columnconfigure(0, weight=1)
 
