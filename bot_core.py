@@ -1,4 +1,4 @@
-# bot_core.py (VERSÃO MELHORADA)
+# bot_core.py (VERSÃO COMPLETA E ATUALIZADA)
 
 import time
 import logging
@@ -30,6 +30,7 @@ class BotCore:
         self.EXPIRATION_TIME = 1
         self.last_candle_times = {}
         self.use_news_filter = settings.get('filter_news', False)
+        self.selected_strategies = settings.get('selected_strategies', [])
 
     def log(self, message):
         logging.info(message)
@@ -56,9 +57,13 @@ class BotCore:
         self.update_ui({'status': 'Erro de Conexão'})
         return None
 
-    # <--- MUDANÇA: Lógica de carregamento de estratégias foi aprimorada --->
     def load_strategies(self):
         strategies = {}
+        if not self.selected_strategies:
+            self.log("ERRO: Nenhuma estratégia foi selecionada para carregar.")
+            return strategies
+            
+        # Determina o caminho base para encontrar a pasta 'strategies'
         if getattr(sys, 'frozen', False):
             base_path = sys._MEIPASS
         else:
@@ -70,43 +75,49 @@ class BotCore:
             return strategies
             
         sys.path.insert(0, base_path)
-        for filename in os.listdir(strategy_folder):
-            # Procura por arquivos de estratégia que não sejam a versão melhorada para evitar duplicatas
-            if filename.startswith('strategy_') and filename.endswith('.py') and 'improved' not in filename:
-                module_name = f"strategies.{filename[:-3]}"
-                try:
-                    module = importlib.import_module(module_name)
-                    
-                    # Lógica de compatibilidade: Apenas carrega a função check_signal
-                    if hasattr(module, 'check_signal'):
-                        strategies[filename] = module.check_signal
-                        self.log(f"Estratégia de FUNÇÃO '{filename}' carregada (modo de compatibilidade).")
-
-                except ImportError as e:
-                    self.log(f"ERRO: Falha ao carregar a estratégia '{module_name}': {e}")
         
-        # Carrega a nova estratégia de CLASSE separadamente, passando as configurações
-        try:
-            from strategies.strategy_ema_rsi_fibo_improved import EmaRsiFiboStrategy
-            # Instancia a classe com as configurações da GUI
-            strategy_instance = EmaRsiFiboStrategy(self.settings)
-            strategies['strategy_ema_rsi_fibo_improved.py'] = strategy_instance
-            self.log("Estratégia de CLASSE 'EmaRsiFiboStrategy' carregada e configurada.")
-        except ImportError:
-            self.log("AVISO: A estratégia melhorada 'strategy_ema_rsi_fibo_improved.py' não foi encontrada.")
+        for filename in self.selected_strategies:
+            module_name = f"strategies.{filename[:-3]}"
+            try:
+                # Importa dinamicamente o módulo da estratégia
+                module = importlib.import_module(module_name)
+                
+                # Lógica para carregar estratégias baseadas em classes ou em funções simples
+                strategy_class_name = None
+                if "improved" in filename: # Exemplo para a estratégia de classe
+                    strategy_class_name = "EmaRsiFiboStrategy"
+
+                if strategy_class_name and hasattr(module, strategy_class_name):
+                    strategy_class = getattr(module, strategy_class_name)
+                    instance = strategy_class(self.settings) # Cria instância da classe
+                    strategies[filename] = instance
+                    self.log(f"Estratégia de CLASSE '{filename}' carregada e configurada.")
+                elif hasattr(module, 'check_signal'):
+                    strategies[filename] = module.check_signal # Usa a função diretamente
+                    self.log(f"Estratégia de FUNÇÃO '{filename}' carregada.")
+                else:
+                    self.log(f"AVISO: O arquivo '{filename}' não contém uma classe ou função 'check_signal' reconhecida.")
+
+            # Captura qualquer tipo de erro durante a importação para evitar travamentos
+            except Exception as e:
+                self.log(f"ERRO CRÍTICO AO CARREGAR '{module_name}': {e}. Verifique o arquivo. Esta estratégia será ignorada.")
         
         sys.path.pop(0)
         return strategies
 
-
     def get_market_type(self):
-        return 'OTC' if datetime.now().weekday() >= 5 else 'REGULAR'
+        now_utc = datetime.utcnow()
+        # Considera OTC a partir de sexta-feira, 21:00 UTC, até domingo, 21:00 UTC.
+        # Weekday: Segunda=0, ..., Sexta=4, Sábado=5, Domingo=6.
+        if now_utc.weekday() > 4 or (now_utc.weekday() == 4 and now_utc.hour >= 21):
+             return 'OTC'
+        return 'REGULAR'
+
 
     def find_active_assets(self, market_type, iq_conn):
         iq_conn.update_open_assets()
         active_assets = []
         self.log(f"--- MODO {market_type}: Buscando ativos ---")
-        all_open_binary = iq_conn.open_binary_assets
         asset_list = self.PREFERRED_ASSETS if market_type == 'REGULAR' else self.OTC_ASSETS
 
         for asset in asset_list:
@@ -114,8 +125,9 @@ class BotCore:
                 active_assets.append({'name': asset, 'type': 'binary'})
                 self.log(f"✓ Ativo Encontrado: {asset}")
 
+        # Se não encontrou ativos preferenciais no mercado regular, tenta os OTC como fallback
         if not active_assets and market_type == 'REGULAR':
-            self.log("Nenhum ativo REGULAR preferido encontrado. Buscando por OTC disponíveis...")
+            self.log("Nenhum ativo REGULAR preferido encontrado. Buscando por OTC disponíveis como alternativa...")
             for asset in self.OTC_ASSETS:
                  if iq_conn.is_asset_available_for_trading(asset, 'binary'):
                     active_assets.append({'name': asset, 'type': 'binary'})
@@ -139,7 +151,7 @@ class BotCore:
         risk_manager = RiskManagement(balance, self.settings)
         strategies = self.load_strategies()
         if not strategies:
-            self.log("ERRO: Nenhuma estratégia carregada."); self.update_ui({'status': 'Erro de Estratégia'}); return
+            self.log("ERRO: Nenhuma estratégia foi carregada. Verifique a seleção e a pasta 'strategies'."); self.update_ui({'status': 'Erro de Estratégia'}); return
 
         news_checker = NewsFilter() if self.use_news_filter else None
         if self.use_news_filter: self.log("Filtro de notícias de alto impacto está ATIVADO.")
@@ -180,15 +192,15 @@ class BotCore:
                     for name, strategy_obj in strategies.items():
                         signal, info = None, {}
                         try:
-                            # <--- MUDANÇA: Lida com ambos os tipos de estratégia (função ou classe) --->
-                            if hasattr(strategy_obj, 'check_signal'): # É uma instância de classe
+                            # Lida com estratégias de classe (com método check_signal) ou de função direta
+                            if hasattr(strategy_obj, 'check_signal'): 
                                 result = strategy_obj.check_signal(df_m1.copy())
                                 if isinstance(result, dict):
                                     signal = result.get('signal')
                                     info = result.get('info', {})
-                                else: # Mantém compatibilidade com a função wrapper
+                                else: 
                                     signal = result
-                            else: # É uma função simples
+                            else: 
                                 signal = strategy_obj(df_m1.copy())
 
                         except Exception as e: self.log(f"Erro na estratégia {name} para {asset_name}: {e}")
@@ -197,13 +209,9 @@ class BotCore:
                             stake = risk_manager.calculate_stake()
                             if stake <= 0: self.log("Valor de entrada é zero. Nenhuma ordem será aberta."); continue
                             
-                            self.log(f"SINAL {signal} em {asset_name} por {name} | Entrada: ${stake:.2f}")
+                            pretty_strategy_name = name.replace('strategy_', '').replace('.py', '')
+                            self.log(f"SINAL {signal} em {asset_name} por {pretty_strategy_name} | Entrada: ${stake:.2f}")
                             
-                            # <--- MUDANÇA: Loga a informação de SL/TP se disponível --->
-                            if info and 'stop_loss' in info and 'take_profit' in info:
-                                self.log(f"  -> Info da Estratégia: SL: {info['stop_loss']:.5f} | TP: {info['take_profit']:.5f} (AVISO: SL/TP não aplicável para Opções Binárias)")
-                            
-                            # A execução continua sendo de Opção Binária
                             order_id = iq.buy_binary(stake, asset_name, signal.lower(), self.EXPIRATION_TIME)
                             if order_id:
                                 self.update_ui({'status': f"Operando em {asset_name}"})
@@ -212,6 +220,10 @@ class BotCore:
                                 
                                 result_msg = "WIN" if profit > 0 else "LOSS" if profit < 0 else "DRAW"
                                 self.log(f"Resultado: {result_msg} | Valor: ${profit:.2f}. P/L Dia: ${risk_manager.daily_profit_loss:.2f}")
+                                
+                                if self.settings.get('capital_strategy') == 'soros':
+                                    self.log(f"📊 Nível atual do Soros: {risk_manager.soros_current_level} de {risk_manager.soros_max_levels}")
+                                
                                 risk_manager.log_trade_to_csv(asset_name, signal, stake, result_msg, profit)
 
                                 self.update_ui({

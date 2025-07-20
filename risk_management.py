@@ -1,4 +1,4 @@
-# risk_management.py
+# risk_management.py (CORRIGIDO NOVAMENTE COM LÓGICA DE SOROS REFINADA)
 
 import csv
 import os
@@ -9,40 +9,33 @@ class RiskManagement:
         self.initial_balance = initial_balance if initial_balance is not None else 0.0
         self.current_balance = self.initial_balance
         
-        # Configurações de entrada
         self.stake_mode = settings.get('stake_mode', 'percentage')
         self.stake_value = settings.get('stake_value', 1.0)
         
-        # Configurações de gerenciamento diário
         self.daily_stop_loss_percentage = settings.get('stop_loss', 10.0)
         self.daily_take_profit_percentage = settings.get('take_profit', 5.0)
         
-        # Lógica de Estratégia de Capital
         self.capital_strategy = settings.get('capital_strategy', 'none')
         
-        # Soros
+        # --- MUDANÇA 1: Simplificação das variáveis de Soros ---
         self.soros_max_levels = settings.get('soros_levels', 2)
         self.soros_current_level = 0
         self.soros_initial_stake = 0.0
-        self.soros_accumulated_profit = 0.0
+        self.soros_profit_to_reinvest = 0.0 # Usaremos esta variável em vez de 'accumulated_profit'
         
-        # Martingale
         self.martingale_multiplier = settings.get('martingale_multiplier', 2.0)
         self.martingale_current_level = 0
         self.martingale_base_stake = 0.0
 
-        # Métricas gerais
         self.daily_profit_loss = 0.0
         self.wins = 0
         self.losses = 0
         self.operations = 0
         
-        # Log CSV
         self.csv_filename = "trade_history.csv"
         self._initialize_csv()
 
     def _initialize_csv(self):
-        """Cria o arquivo CSV com cabeçalho se ele não existir."""
         if not os.path.exists(self.csv_filename):
             with open(self.csv_filename, 'w', newline='', encoding='utf-8') as f:
                 writer = csv.writer(f)
@@ -52,7 +45,6 @@ class RiskManagement:
                 ])
 
     def log_trade_to_csv(self, asset, action, stake, result, profit_loss):
-        """Adiciona uma nova linha ao arquivo CSV com os detalhes da operação."""
         with open(self.csv_filename, 'a', newline='', encoding='utf-8') as f:
             writer = csv.writer(f)
             timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
@@ -82,23 +74,20 @@ class RiskManagement:
     def calculate_stake(self):
         """Calcula o valor da próxima entrada com base na estratégia de capital selecionada."""
         
-        # Se estiver em um ciclo de Soros, calcula a entrada composta.
+        # --- MUDANÇA 2: A fórmula de cálculo dos Soros foi corrigida ---
         if self.capital_strategy == 'soros' and self.soros_current_level > 0:
-            stake = self.soros_initial_stake + self.soros_accumulated_profit
+            # A próxima entrada é o VALOR INICIAL do ciclo + o LUCRO da operação anterior.
+            stake = self.soros_initial_stake + self.soros_profit_to_reinvest
             return min(stake, self.current_balance)
 
-        # Se estiver em um ciclo de Martingale, calcula a entrada multiplicada.
         if self.capital_strategy == 'martingale' and self.martingale_current_level > 0:
             stake = self.martingale_base_stake * (self.martingale_multiplier ** self.martingale_current_level)
             return min(stake, self.current_balance)
 
-        # --- CÁLCULO INICIAL (Apenas para o início de um ciclo) ---
-        # Se não estiver em nenhum ciclo ativo, calcula a entrada base.
         initial_stake = self.calculate_initial_stake()
         
-        # Define o valor base para o ciclo que está prestes a começar.
-        # Esta lógica agora só roda quando soros_current_level e martingale_current_level são 0.
         if self.capital_strategy == 'soros':
+            # Define o valor base que será usado durante todo o ciclo de Soros
             self.soros_initial_stake = initial_stake
         elif self.capital_strategy == 'martingale':
             self.martingale_base_stake = initial_stake
@@ -116,26 +105,30 @@ class RiskManagement:
         elif profit_loss < 0:
             self.losses += 1
 
-        # --- Lógica de atualização da estratégia de capital ---
+        # --- MUDANÇA 3: A lógica de atualização do estado de Soros foi corrigida ---
         if self.capital_strategy == 'soros':
             if profit_loss > 0: # WIN
-                self.soros_accumulated_profit += profit_loss
+                # Guarda apenas o lucro da última operação para reinvestir
+                self.soros_profit_to_reinvest = profit_loss
                 self.soros_current_level += 1
+                # Se atingiu o nível máximo de Soros, reseta o ciclo para pegar os lucros.
                 if self.soros_current_level >= self.soros_max_levels:
                     self.reset_soros_cycle()
             else: # LOSS or DRAW
+                # Se perder, o ciclo de Soros é interrompido imediatamente.
                 self.reset_soros_cycle()
         
         elif self.capital_strategy == 'martingale':
-            if profit_loss > 0: # WIN
+            if profit_loss > 0:
                 self.martingale_current_level = 0
-            elif profit_loss < 0: # LOSS
+            elif profit_loss < 0:
                 self.martingale_current_level += 1
 
     def reset_soros_cycle(self):
+        # --- MUDANÇA 4: A função de reset foi atualizada ---
         self.soros_current_level = 0
         self.soros_initial_stake = 0.0
-        self.soros_accumulated_profit = 0.0
+        self.soros_profit_to_reinvest = 0.0 # Zera o lucro a ser reinvestido
 
     def get_assertiveness(self):
         if self.operations == 0: return 0.0
