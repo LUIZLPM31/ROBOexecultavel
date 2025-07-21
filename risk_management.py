@@ -112,7 +112,7 @@ class RiskManagement:
                 self.soros_profit_to_reinvest = profit_loss
                 self.soros_current_level += 1
                 # Se atingiu o nível máximo de Soros, reseta o ciclo para pegar os lucros.
-                if self.soros_current_level >= self.soros_max_levels:
+                if self.soros_current_level > self.soros_max_levels:
                     self.reset_soros_cycle()
             else: # LOSS or DRAW
                 # Se perder, o ciclo de Soros é interrompido imediatamente.

@@ -50,7 +50,8 @@ class App(ctk.CTk):
         self.log_queue = queue.Queue()
         self.update_queue = queue.Queue()
         self.soros_level_vars = []
-        self.strategy_checkbox_vars = {} ### MUDANÇA ###: Dicionário para guardar os checkboxes das estratégias
+        self.strategy_checkbox_vars = {}
+        self.metric_labels = {} ### Alteração: Inicializado aqui
 
         # Layout principal corrigido
         self.grid_rowconfigure(0, weight=0, minsize=70)
@@ -112,10 +113,9 @@ class App(ctk.CTk):
             'small': ctk.CTkFont(size=10)
         }
 
-        # ### MUDANÇA ###: Alteração da ordem para melhor organização
         self.create_credentials_section(settings_scroll, 0)
         self.create_account_section(settings_scroll, 1)
-        self.create_strategy_selection_section(settings_scroll, 2) # Nova seção
+        self.create_strategy_selection_section(settings_scroll, 2)
         self.create_stake_section(settings_scroll, 3)
         self.create_capital_strategy_section(settings_scroll, 4)
         self.create_filters_section(settings_scroll, 5)
@@ -156,16 +156,13 @@ class App(ctk.CTk):
         ctk.CTkRadioButton(radio_frame, text="🎯 DEMONSTRAÇÃO", variable=self.account_type_var, value="PRACTICE", fg_color=self.colors['accent_secondary'], hover_color=self.colors['accent_primary'], font=self.fonts['body']).grid(row=0, column=0, padx=10, pady=5, sticky="w")
         ctk.CTkRadioButton(radio_frame, text="💰 CONTA REAL", variable=self.account_type_var, value="REAL", fg_color=self.colors['warning'], hover_color=self.colors['danger'], font=self.fonts['body']).grid(row=0, column=1, padx=10, pady=5, sticky="w")
 
-    ### MUDANÇA ###: Nova função para criar a seção de seleção de estratégias
     def create_strategy_selection_section(self, parent, row):
         card = self.create_modern_card(parent, "SELEÇÃO DE ESTRATÉGIAS", "🧠", row)
         
-        # Frame para os checkboxes
         checkbox_frame = ctk.CTkFrame(card, fg_color="transparent")
         checkbox_frame.grid(row=1, column=0, padx=15, pady=(5, 15), sticky="ew")
 
         try:
-            # Detectar o caminho da pasta de estratégias
             if getattr(sys, 'frozen', False):
                 base_path = sys._MEIPASS
             else:
@@ -177,33 +174,25 @@ class App(ctk.CTk):
                 ctk.CTkLabel(checkbox_frame, text="Pasta 'strategies' não encontrada.", font=self.fonts['body'], text_color=self.colors['danger']).pack(anchor="w")
                 return
 
-            # Listar arquivos de estratégia
             strategy_files = [f for f in os.listdir(strategy_folder) if f.startswith('strategy_') and f.endswith('.py')]
 
             if not strategy_files:
                 ctk.CTkLabel(checkbox_frame, text="Nenhuma estratégia encontrada na pasta.", font=self.fonts['body'], text_color=self.colors['warning']).pack(anchor="w")
                 return
 
-            # Criar um checkbox para cada arquivo
             for filename in strategy_files:
-                var = ctk.BooleanVar(value=True) # Deixar marcado por padrão
+                var = ctk.BooleanVar(value=True)
                 self.strategy_checkbox_vars[filename] = var
-                
-                # Nome mais amigável para a UI
                 pretty_name = filename.replace('strategy_', '').replace('_improved', ' (Pro)').replace('.py', '').upper()
                 
                 checkbox = ctk.CTkCheckBox(
-                    checkbox_frame,
-                    text=pretty_name,
-                    variable=var,
-                    font=self.fonts['body'],
-                    fg_color=self.colors['accent_secondary']
+                    checkbox_frame, text=pretty_name, variable=var,
+                    font=self.fonts['body'], fg_color=self.colors['accent_secondary']
                 )
                 checkbox.pack(anchor="w", pady=4)
         
         except Exception as e:
             ctk.CTkLabel(checkbox_frame, text=f"Erro ao carregar estratégias: {e}", font=self.fonts['small'], text_color=self.colors['danger']).pack(anchor="w")
-
 
     def create_stake_section(self, parent, row):
         card = self.create_modern_card(parent, "VALOR DE ENTRADA", "💵", row)
@@ -224,7 +213,7 @@ class App(ctk.CTk):
         self.fixed_entry.grid(row=4, column=0, padx=30, pady=(0, 15), sticky="ew")
 
     def create_capital_strategy_section(self, parent, row):
-        card = self.create_modern_card(parent, "GERENCIAMENTO DE CAPITAL", "📈", row) # Renomeado
+        card = self.create_modern_card(parent, "GERENCIAMENTO DE CAPITAL", "📈", row)
         
         self.capital_strategy_var = ctk.StringVar(value="none")
         
@@ -314,12 +303,21 @@ class App(ctk.CTk):
         
         ctk.CTkLabel(dashboard_frame, text="📊 DASHBOARD EM TEMPO REAL", font=ctk.CTkFont(size=16, weight="bold"), text_color=self.colors['accent_primary']).grid(row=0, column=0, columnspan=5, pady=(15, 10))
 
-        metrics = [("💰", "SALDO", "$0.00", self.colors['accent_primary']), ("📈", "P/L DIÁRIO", "$0.00", self.colors['success']), ("✅", "VITÓRIAS", "0", self.colors['success']), ("❌", "DERROTAS", "0", self.colors['danger']), ("🎯", "ASSERTIVIDADE", "0.00%", self.colors['accent_secondary'])]
+        # --- INÍCIO DA CORREÇÃO ---
+        # A chave (key) é o nome em inglês usado pelo bot_core.
+        # O título (title) é o texto em português exibido na tela.
+        metrics = [
+            ("balance",       "💰", "SALDO",           "$0.00",   self.colors['accent_primary']),
+            ("pnl",           "📈", "P/L DIÁRIO",      "$0.00",   self.colors['success']),
+            ("wins",          "✅", "VITÓRIAS",        "0",       self.colors['success']),
+            ("losses",        "❌", "DERROTAS",        "0",       self.colors['danger']),
+            ("assertiveness", "🎯", "ASSERTIVIDADE",   "0.00%",   self.colors['accent_secondary'])
+        ]
         
-        self.metric_labels = {}
-        for i, (icon, title, value, color) in enumerate(metrics):
-            key = title.lower().replace(" ", "_").replace("/", "")
+        for i, (key, icon, title, value, color) in enumerate(metrics):
+            # A chave correta (key) é usada para armazenar o componente no dicionário.
             self.metric_labels[key] = self.create_metric_card(dashboard_frame, i, icon, title, value, color)
+        # --- FIM DA CORREÇÃO ---
 
     def create_metric_card(self, parent, col, icon, title, value, color):
         card_frame = ctk.CTkFrame(parent, fg_color=self.colors['bg_card'], corner_radius=10, border_width=1, border_color=color)
@@ -362,7 +360,6 @@ class App(ctk.CTk):
 
     def start_bot(self):
         try:
-            ### MUDANÇA ###: Coletar as estratégias selecionadas na interface
             selected_strategies = [filename for filename, var in self.strategy_checkbox_vars.items() if var.get()]
 
             if not selected_strategies:
@@ -380,7 +377,7 @@ class App(ctk.CTk):
                 'capital_strategy': self.capital_strategy_var.get(),
                 'soros_levels': max(1, sum(1 for var in self.soros_level_vars if var.get())) if self.capital_strategy_var.get() == 'soros' else 0,
                 'martingale_multiplier': float(self.martingale_multiplier_entry.get() or 2.0),
-                'selected_strategies': selected_strategies, ### MUDANÇA ###: Passar a lista para as configurações
+                'selected_strategies': selected_strategies,
             }
 
             if settings['stake_mode'] == 'percentage':
@@ -449,21 +446,24 @@ class App(ctk.CTk):
                     if status in ['Parado', 'Meta Atingida', 'Stop Atingido', 'Erro de Conexão', 'Erro de Saldo', 'Erro de Estratégia', 'Erro']:
                         self.stop_button.configure(state="disabled"); self.start_button.configure(state="normal")
                 
-                if 'balance' in data: self.metric_labels['saldo'].configure(text=str(data['balance']))
+                # --- INÍCIO DA CORREÇÃO ---
+                # As chaves agora correspondem às chaves enviadas pelo bot_core e usadas para criar os componentes.
+                if 'balance' in data: self.metric_labels['balance'].configure(text=str(data['balance']))
                 if 'pnl' in data:
                     try:
                         pnl_value = float(str(data['pnl']).replace('$', ''))
                         pnl_color = self.colors['success'] if pnl_value > 0 else self.colors['danger'] if pnl_value < 0 else self.colors['text_secondary']
-                        self.metric_labels['pl_diário'].configure(text=str(data['pnl']), text_color=pnl_color)
-                    except (ValueError, TypeError): self.metric_labels['pl_diário'].configure(text=str(data['pnl']), text_color=self.colors['text_secondary'])
-                if 'wins' in data: self.metric_labels['vitórias'].configure(text=str(data['wins']))
-                if 'losses' in data: self.metric_labels['derrotas'].configure(text=str(data['losses']))
+                        self.metric_labels['pnl'].configure(text=str(data['pnl']), text_color=pnl_color)
+                    except (ValueError, TypeError): self.metric_labels['pnl'].configure(text=str(data['pnl']), text_color=self.colors['text_secondary'])
+                if 'wins' in data: self.metric_labels['wins'].configure(text=str(data['wins']))
+                if 'losses' in data: self.metric_labels['losses'].configure(text=str(data['losses']))
                 if 'assertiveness' in data:
                     try:
                         assertiveness_val = float(str(data['assertiveness']).replace('%', ''))
                         color = self.colors['success'] if assertiveness_val >= 70 else self.colors['warning'] if assertiveness_val >= 50 else self.colors['danger']
-                        self.metric_labels['assertividade'].configure(text=str(data['assertiveness']), text_color=color)
-                    except (ValueError, TypeError): self.metric_labels['assertividade'].configure(text=str(data['assertiveness']), text_color=self.colors['accent_secondary'])
+                        self.metric_labels['assertiveness'].configure(text=str(data['assertiveness']), text_color=color)
+                    except (ValueError, TypeError): self.metric_labels['assertiveness'].configure(text=str(data['assertiveness']), text_color=self.colors['accent_secondary'])
+                # --- FIM DA CORREÇÃO ---
         finally:
             self.after(200, self.process_update_queue)
 
